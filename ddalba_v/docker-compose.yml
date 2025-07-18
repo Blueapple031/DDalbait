@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: hoops-postgres
+    environment:
+      POSTGRES_DB: hoops_platform
+      POSTGRES_USER: hoops_user
+      POSTGRES_PASSWORD: hoops_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./services/api/migrations:/docker-entrypoint-initdb.d
+    networks:
+      - hoops-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hoops_user -d hoops_platform"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: hoops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - hoops-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # API Server
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: hoops-api
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USERNAME: hoops_user
+      DB_PASSWORD: hoops_password
+      DB_NAME: hoops_platform
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: development-secret-key
+      JWT_REFRESH_SECRET: development-refresh-secret
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hoops-network
+    volumes:
+      - ./services/api:/app
+      - /app/node_modules
+    command: yarn dev
+
+  # Web Application
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: hoops-web
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001/graphql
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - hoops-network
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    command: yarn dev
+
+networks:
+  hoops-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data: 
