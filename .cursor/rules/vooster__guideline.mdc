@@ -1,0 +1,251 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Code Guideline for Hoops Platform
+
+## 1. Project Overview
+The Hoops Platform is a monorepo-based, cross-platform basketball match management system.  
+- **Frontend**: React Native 0.73 (Expo SDK 50) for mobile, Next.js 14 (App Router) for web. Shared UI components in `packages/ui`.  
+- **Backend**: NestJS 10 with GraphQL Code‐First on Node.js 20 + TypeScript 5. MikroORM manages PostgreSQL 15, Redis 7 for caching/session.  
+- **Infra & DevOps**: AWS ECS Fargate, RDS Multi-AZ, S3/CloudFront, GitHub Actions CI/CD, auto-scaling, WAF, TLS 1.2, AES-256 at rest.  
+- **Key Decisions**:  
+  - Monorepo packaging with Yarn Workspaces.  
+  - Domain-driven module boundaries in `/services/api/src/modules`.  
+  - GraphQL for core API; REST for file uploads.  
+  - React Query + Context API for state/data; no Redux.  
+
+---
+
+## 2. Core Principles
+1. **Single Responsibility**: Each file/module serves one purpose; measurable by “one class or one hook per file.”  
+2. **Type Safety**: Enforce `strict` TypeScript settings; zero `any`; validate DTOs with class-validator/Zod.  
+3. **Consistent Error Handling**: All async flows must use try/catch + NestJS Exception Filters or React Error Boundaries.  
+4. **Domain Modularity**: Code organized by feature/domain; enforce `/modules/{domain}` structure.  
+5. **Performance-First**: API responses ≤300 ms; use caching, pagination, indexing; measure with automated benchmarks.
+
+---
+
+## 3. Language-Specific Guidelines
+
+### 3.1 TypeScript (Front & Back)
+- **Directory Structure**  
+  ```
+  /hoops-platform
+  ├── apps/
+  │   ├── mobile/      # React Native
+  │   └── web/         # Next.js
+  ├── packages/
+  │   ├── ui/          # Tamagui components
+  │   ├── graphql-client/
+  │   └── config/      # ESLint, tsconfig.base.json
+  └── services/
+      └── api/
+          └── src/
+              ├── modules/
+              ├── common/
+              ├── main.ts
+              └── app.module.ts
+  ```
+- **Imports & Paths**  
+  - Use absolute imports via `tsconfig.json` paths (`@modules`, `@common`, `@ui`).  
+  - Avoid deep relative imports (`../../../`).  
+- **Dependency Management**  
+  - Centralize shared deps in root `package.json`.  
+  - Pin versions; run `yarn workspace foreach yarn lint` on CI.  
+
+### 3.2 React Native & Next.js
+- **File Organization**  
+  - Feature folder per screen:  
+    ```
+    apps/mobile/src/features/MatchList/
+      ├── MatchList.tsx
+      ├── useMatchList.ts
+      └── styles.ts
+    ```
+  - Shared UI in `packages/ui`.  
+- **Error Handling**  
+  - Wrap top‐level in `<ErrorBoundary>`; log to Sentry/CloudWatch.  
+  - Use Suspense + React Query error states.
+
+### 3.3 NestJS & GraphQL
+- **Module Structure**  
+  ```
+  modules/
+    match/
+      ├── dto/
+      ├── entities/
+      ├── match.resolver.ts
+      ├── match.service.ts
+      └── match.module.ts
+  ```
+- **Validation & Serialization**  
+  - Use `class-validator` on DTOs.  
+  - Enable `autoTransform` in `ValidationPipe`.  
+- **Error Handling**  
+  - Throw `new BadRequestException()` for client errors.  
+  - Use a global `HttpExceptionFilter`.
+
+---
+
+## 4. Code Style Rules
+
+### MUST Follow
+1. **ESLint & Prettier**  
+   - Rule: `extends: ['@hoops/eslint-config', 'prettier']`  
+   - Rationale: Enforces consistent style.  
+2. **Type Annotations for Exports**  
+   ```ts
+   export interface User { id: string; name: string }
+   export const getUser = async (): Promise<User> => { /* ... */ }
+   ```
+   - Rationale: Clarity on public API shapes.  
+3. **GraphQL Naming**  
+   - Types: PascalCase (`MatchResult`).  
+   - Queries: `getMatchById`, Mutations: `createMatch`.  
+4. **Async/Await Only**  
+   ```ts
+   // MUST
+   try {
+     const stats = await this.matchService.computeStats();
+   } catch (error) {
+     throw new InternalServerErrorException();
+   }
+   ```
+   - Rationale: Avoid callback hell; consistent error capture.  
+5. **DTO + Validation Pipe**  
+   ```ts
+   @InputType()
+   export class CreateMatchDto {
+     @Field() @IsDateString() date: string;
+     @Field() @IsString() location: string;
+   }
+   ```
+   - Rationale: Guarantees payload correctness.
+
+### MUST NOT Do
+1. **No `any`**  
+   ```ts
+   // MUST NOT
+   const data: any = await fetchData();
+   ```
+   - Replace with precise types.  
+2. **No Large Multi-Responsibility Files**  
+   - Modules >300 LOC must be split.  
+3. **No Inline Network Logic in UI**  
+   - Always use React Query hooks in `use*` files.  
+4. **No Console Logs in Production**  
+   - Use `pino` with log levels; disable `console.log`.  
+5. **No Direct DB Queries in Services**  
+   - Must go through repository/ORM layer.
+
+---
+
+## 5. Architecture Patterns
+
+### 5.1 Module Structure (Backend)
+- **Controller/Resolver → Service → Repository → Entity**  
+- Shared utilities in `common/`, guards/interceptors/filters in `common/`.
+
+### 5.2 Data Flow
+1. Client sends GraphQL request.  
+2. Global Auth Guard validates JWT.  
+3. Resolver delegates to Service.  
+4. Service calls Repository (MikroORM), uses Redis cache if configured.  
+5. Service returns DTO; GraphQL serializes response.
+
+### 5.3 State Management (Frontend)
+- **React Query** for data fetching/caching:  
+  ```ts
+  export const useMatchList = () =>
+    useQuery(['matches'], fetchMatches, { staleTime: 10000 });
+  ```
+- Global state via Context API only for UI theme, auth tokens.
+
+### 5.4 API Design Standards
+- GraphQL Code-First with class decorators.  
+- Queries for reads, Mutations for writes.  
+- Consistent Error Types: `BadRequestException`, `UnauthorizedException`, `NotFoundException`.  
+- File uploads via REST `/upload` endpoint with pre-signed S3 URLs.
+
+---
+
+## 6. Example Code Snippets
+
+```ts
+// MUST: Module folder structure
+// match.module.ts
+import { Module } from '@nestjs/common';
+import { MatchResolver } from './match.resolver';
+import { MatchService } from './match.service';
+import { MatchRepository } from './match.repository';
+
+@Module({
+  providers: [MatchResolver, MatchService, MatchRepository],
+})
+export class MatchModule {}
+```
+
+```ts
+// MUST: GraphQL Resolver with proper error handling
+@Resolver(() => Match)
+export class MatchResolver {
+  constructor(private readonly matchService: MatchService) {}
+
+  @Query(() => Match)
+  async getMatchById(@Args('id', { type: () => ID }) id: string) {
+    const match = await this.matchService.findById(id);
+    if (!match) throw new NotFoundException('Match not found');
+    return match;
+  }
+}
+```
+
+```ts
+// MUST NOT: Mixing DB logic and HTTP in controller
+@Controller('match')
+export class MatchController {
+  @Get()
+  async allMatches() {
+    // ❌ Direct SQL in controller violates SRP and reuse
+    return this.connection.query('SELECT * FROM match');
+  }
+}
+```
+
+```tsx
+// MUST: React Query hook in feature folder
+import { useQuery } from '@tanstack/react-query';
+import { fetchMatches } from '../api/matchApi';
+
+export function useMatchList() {
+  return useQuery(['matches'], fetchMatches, {
+    staleTime: 60000,
+    onError: (err) => console.error(err),
+  });
+}
+```
+
+```tsx
+// MUST NOT: Inline fetch in component
+export function MatchList() {
+  const [matches, setMatches] = useState([]);
+  useEffect(() => {
+    // ❌ Violates data-layer separation
+    fetch('/graphql', { /* ... */ })
+      .then(r => r.json())
+      .then(data => setMatches(data.matches));
+  }, []);
+  return <View>{/* ... */}</View>;
+}
+```
+
+---
+
+## 7. Enforcement & Tooling
+- **CI**: On every PR, run `yarn lint`, `yarn test`, `yarn build`.  
+- **Pre-commit**: Husky + lint-staged for formatting.  
+- **Monitoring**: Track code coverage (Vitest ≥60%, Playwright ≥60%).  
+
+All guidelines above constitute the single source of truth. Adhering ensures maintainable, scalable, and high-quality code across Hoops Platform.

@@ -1,0 +1,41 @@
+{
+  "name": "@hoops-platform/web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "lint": "next lint",
+    "start": "next start",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "14.0.4",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@next/font": "14.0.4",
+    "@apollo/client": "^3.8.8",
+    "graphql": "^16.8.1",
+    "@tanstack/react-query": "^5.17.9",
+    "@tamagui/animations-css": "^1.91.2",
+    "@tamagui/config": "^1.91.2",
+    "@tamagui/core": "^1.91.2",
+    "@tamagui/font-inter": "^1.91.2",
+    "@tamagui/next-plugin": "^1.91.2",
+    "@tamagui/theme-base": "^1.91.2",
+    "@tamagui/themes": "^1.91.2",
+    "tamagui": "^1.91.2",
+    "react-hook-form": "^7.48.2",
+    "@hookform/resolvers": "^3.3.2",
+    "zod": "^3.22.4",
+    "lucide-react": "^0.303.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "eslint": "^8.56.0",
+    "eslint-config-next": "14.0.4",
+    "typescript": "^5.3.3"
+  }
+} 

@@ -1,0 +1,174 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+# Technical Requirements Document (TRD)
+
+## 1. Executive Technical Summary
+- **프로젝트 개요**  
+  - 부산대 및 인근 농구 동호인을 위한 경기 등록·통계·커뮤니티 플랫폼을 2개월 내 MVP로 출시  
+  - 모바일(React Native + Expo)·웹(Next.js) 단일 코드베이스를 사용해 개발 속도 극대화  
+  - 백엔드는 NestJS + GraphQL API로 통합 제공, PostgreSQL·Redis를 활용해 단순·견고한 구조 유지
+- **핵심 기술 스택**  
+  - Frontend: React Native 0.73, Expo SDK 50, Next.js 14  
+  - Backend: Node.js 20, NestJS 10, GraphQL (server @nestjs/graphql)  
+  - Database: PostgreSQL 15, Redis 7  
+  - Infra: AWS Fargate(ECS) + RDS (PostgreSQL) + S3 + CloudFront  
+- **주요 기술 목표**  
+  - API 평균 응답 ≤ 300 ms, 동시 접속 10k 유지  
+  - 배포 자동화, 장애 시 무중단 롤백  
+  - 개인정보·결제정보 AES-256 at rest / TLS 1.2 in transit  
+- **중요 기술 가정**  
+  - 초기 트래픽은 부산대 지역 사용자 중심으로 일일 2k DAU 예상  
+  - 영상은 외부 URL 중심(YouTube, Navertv)으로 저장 용량 최소화  
+  - 2개월 MVP 기간 동안 머신러닝 기능은 보류, 단순 통계 계산만 구현
+
+## 2. Technology Stack Architecture
+### Frontend Technology Stack
+- **Core Framework**: React Native 0.73 (Expo Managed Workflow) / Next.js 14 (App Router)  
+- **State Management**: React Query + Context API; 글로벌 캐싱은 React Query만 사용해 단순화  
+- **Routing & Navigation**: Expo Router(모바일) / Next.js App Router(웹)  
+- **UI/UX Framework**: Tamagui(크로스 플랫폼 컴포넌트) + Tailwind-in-JS(tamagui-twind)  
+- **Build Tools**: Expo CLI·Bun(로컬) / Vite + SWC(웹 빌드)  
+
+### Backend Technology Stack
+- **Runtime Environment**: Node.js 20(LTS) + TypeScript 5  
+- **Web Framework**: NestJS 10(GraphQL Code-First)  
+- **API Design Pattern**: GraphQL HTTP endpoint 단일; 파일 업로드는 REST endpoint 분리  
+- **Data Validation**: class-validator / Zod 섞어 사용, DTO 레이어에 적용  
+- **Middleware Components**:  
+  - 보안: helmet, rate-limit-redis  
+  - 로깅: pino, pino-http  
+  - 모니터링: OpenTelemetry collector  
+
+### Database & Persistence Layer
+- **Primary Database**: PostgreSQL 15(RDS Multi-AZ) – 관계형 데이터·조인 및 트랜잭션 신뢰성 확보  
+- **Schema Design**: 정규화 3NF, JSONB(추가 메타) 혼용; TypeORM/Prisma 대신 MikroORM로 경량화  
+- **Caching Strategy**: Redis 7(ElastiCache) – 세션, 랭킹 조회, GraphQL persisted query 캐시  
+- **Data Migration**: MikroORM migrator + Git 버전 관리; 환경별 자동 적용  
+- **Backup & Recovery**: RDS 자동 스냅샷(일 1회, 7일 보존) + S3 Export; Redis AOF 백업은 주 1회  
+
+### Infrastructure & DevOps
+- **Hosting Environment**: AWS – ECS Fargate(무관리 컨테이너), ALB, WAF  
+- **Containerization**: Dockerfile 멀티스테이지; ARM64 이미지로 비용 절감  
+- **CI/CD Pipeline**: GitHub Actions – PR 단위 테스트, 이미지 빌드, ECR 푸시, ECS 자동 배포  
+- **Monitoring & Observability**: AWS CloudWatch Logs, X-Ray, Grafana Cloud(오픈소스 플랜)  
+- **Logging Strategy**: pino-pretty(개발) / pino-elastic(운영) → Elasticsearch-compatible 저장소  
+
+## 3. System Architecture Design
+### Top-Level Building Blocks
+- 프론트엔드 앱(React Native / Next.js)  
+  - 공통 컴포넌트, GraphQL client, 알림 처리  
+- API Gateway(ALB + NestJS)  
+  - 인증·권한, GraphQL Resolver, REST 파일 업로드  
+- 데이터 계층(PostgreSQL + Redis)  
+  - 관계형 데이터 저장, 캐싱·세션·랭킹  
+- 미디어 서비스(S3)  
+  - 이미지·영상 썸네일 저장, CloudFront CDN 배포  
+- DevOps 파이프라인(GitHub Actions + ECR + Fargate)  
+  - 빌드, 테스트, 배포 자동화  
+
+### Top-Level Component Interaction Diagram
+```mermaid
+graph TD
+    FE[React Native / Next.js] --> GW[API Gateway (NestJS)]
+    GW --> DB[PostgreSQL]
+    GW --> RS[Redis]
+    FE --> S3[(S3 / CloudFront)]
+    GW --> S3
+```
+- 사용자는 모바일·웹 클라이언트(FE)에서 GraphQL 요청을 발행  
+- API Gateway는 인증을 검증한 뒤 PostgreSQL·Redis에 접근  
+- 랭킹·세션 정보는 Redis 캐시를 우선 조회, 없는 경우 PostgreSQL 쿼리  
+- 이미지·영상 업로드는 클라이언트에서 S3 Pre-Signed URL 사용, CDN 통해 배포  
+
+### Code Organization & Convention
+**Domain-Driven Organization Strategy**
+- 도메인 기준: match, club, player, ranking, auth, payment, media  
+- 레이어: controller(resolver) → service → repository → entity  
+- 기능 모듈별 단일 책임; 공유 유틸은 common 모듈로 분리  
+- 프론트는 feature 폴더 방식; hooks, ui, api 등 재사용성 고려  
+
+**Universal File & Folder Structure**
+```
+/hoops-platform
+├── apps/
+│   ├── mobile/          # React Native + Expo
+│   └── web/             # Next.js
+├── packages/
+│   ├── ui/              # Tamagui shared components
+│   ├── graphql-client/  # Apollo setup
+│   └── config/          # ESLint, tsconfig base
+├── services/
+│   └── api/
+│       ├── src/
+│       │   ├── modules/
+│       │   │   ├── auth/
+│       │   │   ├── club/
+│       │   │   ├── match/
+│       │   │   ├── player/
+│       │   │   ├── ranking/
+│       │   │   └── media/
+│       │   ├── common/
+│       │   ├── main.ts
+│       │   └── app.module.ts
+│       └── Dockerfile
+├── infrastructure/
+│   ├── terraform/       # RDS, ECS, S3, CloudFront
+│   └── github-actions/  # CI/CD workflows
+└── docs/
+    └── architecture.md
+```
+
+### Data Flow & Communication Patterns
+- **Client-Server Communication**: Apollo Client → GraphQL over HTTPS; 에러는 GraphQL error extension에 코드 포함  
+- **Database Interaction**: MikroORM Unit-of-Work 패턴, 트랜잭션 단위는 요청별 Context  
+- **External Service Integration**: Firebase Cloud Messaging, OAuth2(SNS 로그인), Stripe Webhook REST endpoint  
+- **Real-time Communication**: 랭킹 변동 알림은 FCM 푸시; WebSocket 미도입(단순 푸시로 충분)  
+- **Data Synchronization**: Redis pub/sub로 랭킹 업데이트 브로드캐스트, DB와 주기적 5초 간격 동기화  
+
+## 4. Performance & Optimization Strategy
+- 쿼리 최적화: 인덱스 설계(경기 날짜, 팀 ID 복합), EXPLAIN 분석 후 300 ms 기준 검증  
+- GraphQL persisted query + CDN edge cache를 활용해 공통 조회 Latency 감소  
+- 이미지 리사이즈 Lambda@Edge로 실행, FE에는 WebP 만 전달해 데이터 전송량 30 % 절감  
+- AWS Fargate 오토스케일: CPU 70 % 이상 시 2분 내 컨테이너 수평 확장  
+
+## 5. Implementation Roadmap & Milestones
+### Phase 1: Foundation (MVP Implementation) – M0~M2
+- Core Infrastructure: VPC, RDS, ECS, S3, CI/CD 구축  
+- Essential Features: 경기 게시, 결과 입력, 기본 통계, 랭킹 리스트  
+- Basic Security: JWT OAuth, HTTPS, WAF 기본 룰  
+- Development Setup: 모노레포, ESLint/Prettier, Husky pre-commit  
+- Timeline: 8주  
+
+### Phase 2: Feature Enhancement – M2~M4
+- Advanced Features: 심판 모드, 캘린더 동기화, SNS 공유, 푸시 알림  
+- Performance Optimization: 캐싱 레이어, 이미지 CDN, 인덱스 튜닝  
+- Enhanced Security: 2FA 선택, DB 암호화 컬럼 수준 확대  
+- Monitoring Implementation: Grafana 대시보드, Alertmanager  
+- Timeline: 8주  
+
+### Phase 3: Scaling & Optimization – M4~M6
+- Scalability Implementation: 멀티 AZ / Read Replica, Redis Cluster  
+- Advanced Integrations: Stripe 결제, 광고 모듈, 포인트 상점  
+- Enterprise Features: 관리자 대시보드, 신고·제재 워크플로우  
+- Compliance & Auditing: 로그 불변 스토리지(S3 Object Lock), 개인정보 파기 정책  
+- Timeline: 8주  
+
+## 6. Risk Assessment & Mitigation Strategies
+### Technical Risk Analysis
+- **기술 선택 위험**: GraphQL 과다 복잡성 → Code-First 스키마, 모놀리식 API 유지  
+- **성능 위험**: 랭킹 집계 병목 → Redis Sorted Set, 비동기 집계 워커  
+- **보안 위험**: JWT 탈취 → short-lived token(15 min) + Refresh Token Rotation  
+- **통합 위험**: 외부 OAuth 장애 → 로컬 이메일 로그인 대안 유지  
+- **대응 전략**: SLO 정의, 캐패시티 테스트, 보안 Pen-Test 사전 실행  
+
+### Project Delivery Risks
+- **일정 위험**: 2개월 MVP 달성 실패 가능 → 스코프 엄격 관리, Nice-to-Have 기능 뒤로 이동  
+- **자원 위험**: 풀스택 인력 부족 → 모노레포로 코드 재사용 극대화, 업무 교차 가능  
+- **품질 위험**: 테스트 커버리지 저하 → Vitest(unit) + Playwright(e2e) 목표 60 % 이상  
+- **배포 위험**: 잘못된 이미지 배포 → GitHub Actions Canary 배포 단계, 1회 트래픽 10 %  
+- **우회 계획**: 기능 토글, 롤백 스크립트, 데이터 백업 사전 검증  
+
+
